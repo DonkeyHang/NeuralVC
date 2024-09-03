@@ -87,9 +87,9 @@ class SpeakerEncoder(nn.Module):
         assert 0 < min_coverage <= 1
         
         # Compute how many frames separate two partial utterances
-        samples_per_frame = int((sampling_rate * mel_window_step / 1000))
-        n_frames = int(np.ceil((n_samples + 1) / samples_per_frame))
-        frame_step = int(np.round((sampling_rate / rate) / samples_per_frame))
+        samples_per_frame = int((sampling_rate * mel_window_step / 1000))       # 160
+        n_frames = int(np.ceil((n_samples + 1) / samples_per_frame))            # 160 * numBlock
+        frame_step = int(np.round((sampling_rate / rate) / samples_per_frame))  # 77
         assert 0 < frame_step, "The rate is too high"
         assert frame_step <= partials_n_frames, "The rate is too low, it should be %f at least" % \
             (sampling_rate / (samples_per_frame * partials_n_frames))
@@ -145,7 +145,7 @@ class SpeakerEncoder(nn.Module):
             wav = np.pad(wav, (0, max_wave_length - len(wav)), "constant")
         
         # Split the utterance into partials and forward them through the model
-        mel = audio.wav_to_mel_spectrogram(wav)
+        mel = audio.wav_to_mel_spectrogram(wav)                         #[numBlock,40]
         mels = np.array([mel[s] for s in mel_slices])
         with torch.no_grad():
             mels = torch.from_numpy(mels).to(self.device)
