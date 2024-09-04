@@ -18,9 +18,13 @@ from hubert.hubert.model import HubertSoft
 from speaker_encoder.voice_encoder import SpeakerEncoder
 logging.getLogger('numba').setLevel(logging.WARNING)
 
-PROCESS_BUFFER_SIZE = 160*30
-PROCESS_OVERLAP_SIZE = int(PROCESS_BUFFER_SIZE/2)
 FRAME_320 = 320
+FRAME_160 = 160
+FRAME_NUM = 25
+PROCESS_BUFFER_SIZE = FRAME_160*FRAME_NUM
+PROCESS_OVERLAP_SIZE = int(PROCESS_BUFFER_SIZE/2)
+PROCESS_BUFFER_SIZE_SUB_1 = PROCESS_BUFFER_SIZE - FRAME_160
+
 
 def vorbis_window(n):
     indices = torch.arange(n, dtype=torch.float32) + 0.5
@@ -169,8 +173,10 @@ def ut_3():
         g_tgt = smodel.embed_utterance(wav_tgt)
         g_tgt = torch.from_numpy(g_tgt).unsqueeze(0)        #input:[], output:[256]
 
-        win = vorbis_window(PROCESS_BUFFER_SIZE).detach().numpy()
-        cache_buf = np.zeros(int(PROCESS_BUFFER_SIZE/2))
+        # win = vorbis_window(PROCESS_BUFFER_SIZE).detach().numpy()
+        win = vorbis_window(FRAME_320).detach().numpy()
+        win_new = np.concatenate((win[:FRAME_160],np.ones(PROCESS_BUFFER_SIZE-FRAME_320),win[FRAME_160:]),axis=0).astype(np.float32)
+        cache_buf = np.zeros(int(PROCESS_BUFFER_SIZE - PROCESS_BUFFER_SIZE_SUB_1))
         
 
         for src in tqdm(src_list):
@@ -180,18 +186,19 @@ def ut_3():
             sf.write(os.path.join(args.outdir, tgtname, f"src_{srcname}.wav"), wav_src, hps.data.sampling_rate)
             
             output_audio = wav_src * 0
-            num_frame = wav_src.shape[0] // PROCESS_OVERLAP_SIZE - 1
+            num_frame = wav_src.shape[0] // PROCESS_BUFFER_SIZE_SUB_1 - 2
             
             with torch.no_grad():
                 for idx in tqdm(range(num_frame)):
-                    audio_tmp = wav_src[idx*PROCESS_OVERLAP_SIZE:idx*PROCESS_OVERLAP_SIZE+PROCESS_BUFFER_SIZE]
+                    audio_tmp = wav_src[idx*PROCESS_BUFFER_SIZE_SUB_1:idx*PROCESS_BUFFER_SIZE_SUB_1+PROCESS_BUFFER_SIZE] * win_new
                     tensor_tmp = torch.from_numpy(audio_tmp).unsqueeze(0).unsqueeze(0)
                     c = hubert.units(tensor_tmp)
                     c = c.transpose(1,2)                        #output:[1,256,_]
                     audio = net_g.infer(c, g=g_tgt)
-                    audio = audio[0][0].data.cpu().float().numpy() * win
-                    output_audio[idx*PROCESS_OVERLAP_SIZE:(idx+1)*PROCESS_OVERLAP_SIZE] = audio[:PROCESS_OVERLAP_SIZE].copy() + cache_buf
-                    cache_buf = audio[PROCESS_OVERLAP_SIZE:].copy()
+                    audio = audio[0][0].data.cpu().float().numpy()
+                    output_audio[idx*PROCESS_BUFFER_SIZE_SUB_1:(idx+1)*PROCESS_BUFFER_SIZE_SUB_1] = audio[:PROCESS_BUFFER_SIZE_SUB_1].copy()
+                    output_audio[idx*PROCESS_BUFFER_SIZE_SUB_1:idx*PROCESS_BUFFER_SIZE_SUB_1+FRAME_160] += cache_buf
+                    cache_buf = audio[-160:].copy()
                 
             write(os.path.join(args.outdir, tgtname, f"{title}.wav"), hps.data.sampling_rate, output_audio)
 
